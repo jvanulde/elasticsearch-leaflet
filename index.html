@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Leaflet Example</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        #map {
+            width: 100%;
+            height: 500px;
+        }
+
+        .legend {
+            line-height: 18px;
+            color: #555;
+            background: white;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            padding: 6px 8px;
+        }
+
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.7;
+        }
+
+        #alert {
+            position: absolute;
+            z-index: 100;
+            bottom: 0px;
+            left: 0px;
+            background: rgb(220, 20, 20);
+            color: white;
+            padding: 5px;
+            
+        }
+
+        #modal {
+            background-color: white;
+            animation-name: progress;
+            animation-duration: 2s;
+            animation-iteration-count: infinite;
+            height: 4px;
+            margin-top: -4px;
+        }
+
+        @keyframes progress {
+            0% {
+                background-color: white;
+            }
+            50% {
+                background-color:rgba(255, 0, 0, 0.500);
+            }
+            100% {
+                background-color: white;
+            }
+        }
+
+        .attr {
+            width: 25%;
+            float: left;
+        }
+
+        .prop {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .prop::after {
+            content: ':';
+        }
+
+        .val {
+            float: right;
+            margin-right: 10px;
+        }
+
+        #sidebar {
+            overflow: auto;
+        }
+    </style>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+        integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+        crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+        integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+        crossorigin=""></script>
+    <!-- <script src="node_modules/@elastic"></script> -->
+    <!-- <script src="node_modules/geohash/lib/geohash.js"></script>
+    <script src="lib/leaflet.markercluster.js"></script> -->
+    <script src="https://code.jquery.com/jquery-1.12.2.min.js"
+        integrity="sha256-lZFHibXzMHo3GGeehn1hudTAP3Sc0uKXBXAzHX1sjtk=" crossorigin="anonymous"></script>
+
+</head>
+
+<body>
+
+    <h1>Sample Leaflet Map with Elasticsearch</h1>
+    
+    <div id="alert">Too many results returned! Not all features were added to the map. Try zooming into a smaller map extent.</div>
+    
+    <div id="map" style="z-index: 1;"></div>
+    
+    <div id="sidebar"></div>
+
+    <p></p>
+    
+    <script>
+
+        var scenario = "nhsl_hazard_threat_all_indicators_s",
+            scenario_prop = "MHn_Intensity",
+            base_url = "https://api.dev.riskprofiler.ca",
+            featureLimit = 10000,
+            map;
+
+        var tiles = L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors, Points &copy 2012 LINZ'
+        });
+
+        var geojsonLayer = L.geoJSON( null, { style: featureStyle } ),
+            legend = L.control( { position: 'bottomright' } ),
+            map = L.map( 'map', { layers: [ tiles, geojsonLayer ] });
+        
+        map.on( 'load', function ( e ) { 
+            
+            // add progress indicator
+            if( $( '#modal' ).length == 0 ) {
+                $( '#map' ).before( '<div id="modal"></div>' );
+            }
+            search(); 
+        });
+        
+        map.setView( [49.2827, -123.1207], 12 );
+        
+        map.on( 'zoomend dragend', function ( e ) {
+
+            // add progress indicator
+            if( $( '#modal' ).length == 0 ) {
+                $( '#map' ).before( '<div id="modal"></div>' );
+            }
+            search();
+        });
+
+        function search( scroll_id ) {
+            
+            $( '#alert' ).hide();
+            
+            // clear the features in the layer
+            geojsonLayer.clearLayers();
+            
+            // get the data from Elasticsearch
+            getData();
+        }
+
+        function getData( scroll_id ) {
+
+            var b = map.getBounds(),
+                b1 = {
+                    "trlat": b.getNorthWest().lat,
+                    "trlon": b.getNorthWest().lng,
+                    "bllat": b.getSouthEast().lat,
+                    "bllon": b.getSouthEast().lng
+                }, scroll_id;
+            
+            // bounding box query
+            var d = {  
+                "size": 1000,
+                "query": {
+                    "geo_shape": {
+                        "geometry": {
+                            "shape": {
+                                "type": "envelope",
+                                "coordinates": [ [ b1.trlon, b1.trlat ], [ b1.bllon, b1.bllat ] ]
+                            },
+                            "relation": "intersects"
+                        }
+                    }
+                }
+            }
+
+            // range query
+            // var d = {
+            //     "query": {
+            //         "range": {
+            //             "properties.sH_PGA": {
+            //                 "gte": 0.047580,
+            //                 "lte": 0.047584
+            //             }
+            //         }
+            //     }
+            // };
+
+            // return all query
+            // var d = {
+            //     "size": "1000",
+            //     "query": {
+            //         "bool": {
+            //             "must": {
+            //                 "match_all": {}
+            //             }
+            //         }
+            //     }
+            // };
+
+            if ( scroll_id ) {
+                d = {
+                    "scroll": "1m",
+                    "scroll_id" : scroll_id
+                }
+            }
+
+            var url = scroll_id ? 
+                "https://api.dev.riskprofiler.ca/_search/scroll"
+                    : "https://api.dev.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
+            
+            $.ajax({
+                method: "POST",
+                tryCount : 0,
+                retryLimit : 3,
+                crossDomain: true,
+                url: url,
+                data: JSON.stringify( d ),
+                headers: { "content-type": "application/json" }
+            })
+            .done( function ( resp ) {
+
+                // addGeoJSONFeatures( resp.hits.hits );
+
+                var len = geojsonLayer.getLayers().length;
+
+                if ( len === resp.hits.total.value || len === featureLimit ) {
+                    $( '#modal' ).remove();
+                }
+
+                if ( len < resp.hits.total.value && len < featureLimit ) {
+                    addGeoJSONFeatures( resp.hits.hits, function( e ) {
+                        if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
+                            getData( resp._scroll_id );
+                        }
+                        if ( geojsonLayer.getLayers().length >= featureLimit ) {
+                            $('#alert').show();
+                        }
+                    } );
+                }
+            })
+            .fail( function ( error ) {
+                this.tryCount++;
+                if ( this.tryCount <= this.retryLimit ) {
+                    //try again
+                    $.ajax( this );
+                    return;
+                }   
+                console.log( "Doh! " + error )         
+                return;
+                
+            });
+        }
+
+        function addGeoJSONFeatures( data, callback ) {
+
+            var features = [],
+                source,
+                d;
+
+            data.forEach( feature => {
+                source = feature._source;
+                source.properties._id = feature._id;
+                features.push( source );
+            });
+
+            geojsonLayer.addData( features );
+
+            if ( callback ) {
+                callback();
+            }
+        }
+
+        function getColor(d) {
+            return d > 0.7 ? '#800026' :
+                d > 0.6  ? '#BD0026' :
+                d > 0.5  ? '#E31A1C' :
+                d > 0.4  ? '#FC4E2A' :
+                d > 0.3   ? '#FD8D3C' :
+                d > 0.2   ? '#FEB24C' :
+                d > 0.1   ? '#FED976' :
+                            '#FFEDA0';
+        }
+
+        function featureStyle( feature ) {
+            return {
+                fillColor: getColor( feature.properties[ scenario_prop ] ),
+                weight: 0.5,
+                opacity: 1,
+                color: 'white',
+                dashArray: '0',
+                fillOpacity: 0.5
+            };
+        }
+
+        var oldId;
+
+        geojsonLayer.on( 'click', function ( e ) {
+
+            // geojsonLayer.resetFeatureStyle( oldId );
+
+            // oldId = e.layer.feature.id;
+
+            // geojsonLayer.setFeatureStyle( e.layer.feature.id, {
+            // fillColor: 'red',
+            // color: 'red',
+            // weight: 3,
+            // fillOpacity: 0.5
+            // });
+
+            // zoom to selected feature
+            // var bounds = e.layer.getBounds();
+            // map.fitBounds( bounds );
+
+            $.ajax({
+                method: "GET",
+                tryCount : 0,
+                retryLimit : 3,
+                crossDomain: true,
+                url: base_url + "/" + scenario + "/_doc/" + e.layer.feature.properties['_id'],
+                headers: { "content-type": "application/json" }
+            })
+            .done( function ( resp ) {
+
+                let props = resp._source.properties,
+                    string = '';
+
+                for ( const key in props ) {
+
+                    if ( key === 'geom_poly' || key === 'geom_point' ) { continue }
+
+                    string +=
+                        '<div class="attr"><span class="prop">' + key + '</span><span class="val">' + props[key] + '</span></div>';
+                }
+            
+                $( '#sidebar' ).html( '<h3>Selected feature properties</h3>' + string );
+                
+            })
+            .fail( function ( error ) {
+                this.tryCount++;
+                if ( this.tryCount <= this.retryLimit ) {
+                    //try again
+                    $.ajax( this );
+                    return;
+                }   
+                console.log( "Doh! " + error )         
+                return;
+                
+            });
+            
+        });
+
+        legend.onAdd = function ( map ) {
+
+            var div = L.DomUtil.create('div', 'info legend'),
+                grades = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+                labels = [];
+
+            div.innerHTML = "<div style=\"padding: 3px;\"><b>" + scenario_prop + "</b></div>";
+
+            // loop through our density intervals and generate a label with a colored square for each interval
+            for (var i = 0; i < grades.length; i++ ) {
+                div.innerHTML +=
+                    '<i style="background:' + getColor(grades[i]) + '"></i> ' +
+                    grades[i] + ( grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+' );
+            }
+
+            return div;
+        };
+
+        legend.addTo( map );
+
+    </script>
+</body>
+
+</html>
