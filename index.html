@@ -177,6 +177,7 @@
             // bounding box query
             var d = {  
                 "size": 1000,
+                "_source": [ "id","type", "geometry.*", "properties.MHn_Intensity" ],
                 "query": {
                     "geo_shape": {
                         "geometry": {
@@ -250,7 +251,7 @@
                             getData( resp._scroll_id );
                         }
                         if ( geojsonLayer.getLayers().length >= featureLimit ) {
-                            $('#alert').show();
+                            $( '#alert' ).show();
                         }
                     } );
                 }
@@ -309,20 +310,7 @@
             };
         }
 
-        var oldId;
-
         geojsonLayer.on( 'click', function ( e ) {
-
-            // geojsonLayer.resetFeatureStyle( oldId );
-
-            // oldId = e.layer.feature.id;
-
-            // geojsonLayer.setFeatureStyle( e.layer.feature.id, {
-            // fillColor: 'red',
-            // color: 'red',
-            // weight: 3,
-            // fillOpacity: 0.5
-            // });
 
             // zoom to selected feature
             // var bounds = e.layer.getBounds();
