@@ -177,7 +177,7 @@
             // bounding box query
             var d = {  
                 "size": 1000,
-                "_source": [ "id","type", "geometry.*", "properties.MHn_Intensity" ],
+                "_source": [ "id","type", "geometry.*", "properties." + scenario_prop ],
                 "query": {
                     "geo_shape": {
                         "geometry": {
