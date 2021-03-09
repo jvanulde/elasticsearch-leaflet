@@ -1,2 +1,3 @@
 # elasticsearch-leaflet
-Basic viewer for OpenDRR Elasticsearch services implemented using Leaflet.js.
+
+Live sample here: https://opendrr.github.io/elasticsearch-leaflet/
