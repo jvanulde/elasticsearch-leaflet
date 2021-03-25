@@ -103,6 +103,8 @@
     <script src="https://code.jquery.com/jquery-1.12.2.min.js"
         integrity="sha256-lZFHibXzMHo3GGeehn1hudTAP3Sc0uKXBXAzHX1sjtk=" crossorigin="anonymous"></script>
 
+    <script src="leaflet-heat.js"></script>
+
 </head>
 
 <body>
@@ -119,7 +121,7 @@
     
     <script>
 
-        var scenario = "nhsl_hazard_threat_all_indicators_s",
+        var scenario = "dsra_idm5p4_sidney_all_indicators_b",
             scenario_prop = "MHn_Intensity",
             base_url = "https://api.dev.riskprofiler.ca",
             featureLimit = 10000,
@@ -142,7 +144,8 @@
             search(); 
         });
         
-        map.setView( [49.2827, -123.1207], 12 );
+        // map.setView( [49.2827, -123.1207], 12 );
+        map.setView( [54.7, -127.7], 5 );
         
         map.on( 'zoomend dragend', function ( e ) {
 
@@ -175,17 +178,30 @@
                 }, scroll_id;
             
             // bounding box query
-            var d = {  
-                "size": 1000,
-                "_source": [ "id","type", "geometry.*", "properties." + scenario_prop ],
-                "query": {
-                    "geo_shape": {
-                        "geometry": {
-                            "shape": {
-                                "type": "envelope",
-                                "coordinates": [ [ b1.trlon, b1.trlat ], [ b1.bllon, b1.bllat ] ]
-                            },
-                            "relation": "intersects"
+            // var d = {  
+            //     "size": 1000,
+            //     "_source": [ "id","type", "geometry.*", "properties." + scenario_prop ],
+            //     "query": {
+            //         "geo_shape": {
+            //             "geometry": {
+            //                 "shape": {
+            //                     "type": "envelope",
+            //                     "coordinates": [ [ b1.trlon, b1.trlat ], [ b1.bllon, b1.bllat ] ]
+            //                 },
+            //                 "relation": "intersects"
+            //             }
+            //         }
+            //     }
+            // }
+            
+            // Geotile Grid Aggregation
+            var d = {
+                "size": 0,
+                "aggregations": {
+                    "large-grid": {
+                        "geotile_grid": {
+                            "field": "coordinates",
+                            "precision": 8
                         }
                     }
                 }
@@ -215,16 +231,18 @@
             //     }
             // };
 
-            if ( scroll_id ) {
-                d = {
-                    "scroll": "1m",
-                    "scroll_id" : scroll_id
-                }
-            }
+            // if ( scroll_id ) {
+            //     d = {
+            //         "scroll": "1m",
+            //         "scroll_id" : scroll_id
+            //     }
+            // }
 
-            var url = scroll_id ? 
-                "https://api.dev.riskprofiler.ca/_search/scroll"
-                    : "https://api.dev.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
+            // var url = scroll_id ? 
+            //     "https://api.dev.riskprofiler.ca/_search/scroll"
+            //         : "https://api.dev.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
+
+            var url = "https://api.dev.riskprofiler.ca/" + scenario + "/_search";
             
             $.ajax({
                 method: "POST",
@@ -237,24 +255,56 @@
             })
             .done( function ( resp ) {
 
-                // addGeoJSONFeatures( resp.hits.hits );
+                console.log( resp );
 
-                var len = geojsonLayer.getLayers().length;
+                let markers = [];
 
-                if ( len === resp.hits.total.value || len === featureLimit ) {
-                    $( '#modal' ).remove();
-                }
+                const buckets = resp.aggregations['large-grid'].buckets;
 
-                if ( len < resp.hits.total.value && len < featureLimit ) {
-                    addGeoJSONFeatures( resp.hits.hits, function( e ) {
-                        if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
-                            getData( resp._scroll_id );
-                        }
-                        if ( geojsonLayer.getLayers().length >= featureLimit ) {
-                            $( '#alert' ).show();
-                        }
-                    } );
-                }
+                buckets.forEach( bucket => {
+                    
+                    // console.log( bucket );
+
+                    splitbucket = bucket.key.split('/');
+
+                    let z = splitbucket[0];
+                    let x = splitbucket[1];
+                    let y = splitbucket[2];
+
+                    let lat = tile2lat( y, z );
+                    let lon = tile2long( x, z );
+
+                    markers.push( [ lat, lon, bucket.doc_count ] );
+
+
+                    // https://github.com/adammertel/Leaflet.RegularGridCluster
+
+                    
+                }); 
+
+                var heat = L.heatLayer( markers, { radius: 25 } ).addTo( map );
+                $( '#modal' ).remove();
+
+
+
+                // var len = geojsonLayer.getLayers().length;
+
+                // if ( len === resp.hits.total.value || len === featureLimit ) {
+                //     $( '#modal' ).remove();
+                // }
+
+                // if ( len < resp.hits.total.value && len < featureLimit ) {
+                //     addGeoJSONFeatures( resp.hits.hits, function( e ) {
+                //         if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
+                //             getData( resp._scroll_id );
+                //         }
+                //         if ( geojsonLayer.getLayers().length >= featureLimit ) {
+                //             $( '#alert' ).show();
+                //         }
+                //     } );
+                // }
+
+                
             })
             .fail( function ( error ) {
                 this.tryCount++;
@@ -267,6 +317,18 @@
                 return;
                 
             });
+        }
+
+        // tile to lat lon calculations
+        // https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Implementations
+
+        function tile2long( x, z ) {
+            return ( x/Math.pow( 2, z )*360-180 );
+        }
+        
+        function tile2lat( y, z ) {
+            var n=Math.PI-2*Math.PI*y/Math.pow( 2, z );
+            return ( 180/Math.PI*Math.atan( 0.5*( Math.exp( n )-Math.exp( -n ))) );
         }
 
         function addGeoJSONFeatures( data, callback ) {
@@ -372,7 +434,7 @@
             return div;
         };
 
-        legend.addTo( map );
+        // legend.addTo( map );
 
     </script>
 </body>
