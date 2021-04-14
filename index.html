@@ -89,6 +89,10 @@
         #sidebar {
             overflow: auto;
         }
+
+        .leaflet-heatmap-layer {
+opacity: .5;
+}
     </style>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
@@ -104,6 +108,7 @@
         integrity="sha256-lZFHibXzMHo3GGeehn1hudTAP3Sc0uKXBXAzHX1sjtk=" crossorigin="anonymous"></script>
 
     <script src="leaflet-heat.js"></script>
+    <script src="sphericalmercator.js"></script>
 
 </head>
 
@@ -122,18 +127,28 @@
     <script>
 
         var scenario = "dsra_idm5p4_sidney_all_indicators_b",
+            scenario = "nhsl_physical_exposure_all_indicators_b",
             scenario_prop = "MHn_Intensity",
             base_url = "https://api.dev.riskprofiler.ca",
             featureLimit = 10000,
+            markers = [],
+            zoom = 5,
             map;
+
+        var merc = new SphericalMercator({
+            size: 256
+        });
 
         var tiles = L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors, Points &copy 2012 LINZ'
         });
 
         var geojsonLayer = L.geoJSON( null, { style: featureStyle } ),
+            // heat = L.heatLayer( markers, { blur: 15, radius: 25, gradient: { 0.4: 'yellow', 0.5: 'orange', 1: 'red' } } ),
+            heat = L.heatLayer( markers, { blur: 15, radius: 25 } ),
             legend = L.control( { position: 'bottomright' } ),
-            map = L.map( 'map', { layers: [ tiles, geojsonLayer ] });
+            map = L.map( 'map', { layers: [ tiles, geojsonLayer, heat ] }),
+            bboxLayer = L.layerGroup().addTo( map );
         
         map.on( 'load', function ( e ) { 
             
@@ -143,11 +158,14 @@
             }
             search(); 
         });
-        
+
         // map.setView( [49.2827, -123.1207], 12 );
-        map.setView( [54.7, -127.7], 5 );
-        
+        // map.setView( [56, -106], zoom ); // national
+        map.setView( [54.7, -127.7], zoom ); // bc
+
         map.on( 'zoomend dragend', function ( e ) {
+
+            zoom = e.target.getZoom();
 
             // add progress indicator
             if( $( '#modal' ).length == 0 ) {
@@ -162,19 +180,50 @@
             
             // clear the features in the layer
             geojsonLayer.clearLayers();
+            bboxLayer.clearLayers();
+
+            // heat.clear();
             
             // get the data from Elasticsearch
             getData();
+        }
+
+        /* calculate the grid precision
+
+            Elasticsearch Grid Tile Aggregation:
+
+            Each cell is labeled using a "{zoom}/{x}/{y}" format, where zoom is equal to the user-specified precision.
+
+            High precision keys have a larger range for x and y, and represent tiles that cover only a small area.
+            Low precision keys have a smaller range for x and y, and represent tiles that each cover a large area.
+            See Zoom level documentation on how precision (zoom) correlates to size on the ground. 
+            Precision for this aggregation can be between 0 and 29, inclusive.
+
+            The highest-precision geotile of length 29 produces cells that cover less than a 10cm by 10cm of land and so 
+            high-precision requests can be very costly in terms of RAM and result sizes.
+
+            Leaflet Zoom Levels: 
+
+            For the OSM service there are 18 zoom levels.
+        */
+        function calcPrecision() {
+
+            var p = (zoom*( 29/18 )).toFixed( 0 );
+
+            // console.log( p );
+
+            return p;
+
         }
 
         function getData( scroll_id ) {
 
             var b = map.getBounds(),
                 b1 = {
-                    "trlat": b.getNorthWest().lat,
-                    "trlon": b.getNorthWest().lng,
-                    "bllat": b.getSouthEast().lat,
-                    "bllon": b.getSouthEast().lng
+                    "tllat": b.getNorthWest().lat > 90 ? 90 : b.getNorthWest().lat,
+                    "tllon": b.getNorthWest().lng < -180 ? -180 : b.getNorthWest().lng,
+                    "brlat": b.getSouthEast().lat < -90 ? -90 : b.getSouthEast().lat,
+                    "brlon": b.getSouthEast().lng > 180 ? 180 : b.getSouthEast().lng
                 }, scroll_id;
             
             // bounding box query
@@ -195,13 +244,94 @@
             // }
             
             // Geotile Grid Aggregation
+
+            /*
+                SCENARIO
+            */
             var d = {
                 "size": 0,
-                "aggregations": {
-                    "large-grid": {
-                        "geotile_grid": {
-                            "field": "coordinates",
-                            "precision": 8
+                "aggs": {
+                    "my_applicable_filters": {
+                        "filter": {
+                            "bool": {
+                                "must": [
+                                    {
+                                        "range": {
+                                            "properties.sH_PGA": {
+                                                "gte": 0.002
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "geo_bounding_box": {
+                                            "geometry.coordinates": {
+                                                "top_left": b1.tllat + ',' + b1.tllon,
+                                                "bottom_right": b1.brlat + ',' + b1.brlon
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "aggs": {
+                            "avg_my_field": {
+                                "avg": {
+                                    "field": "properties.sH_PGA"
+                                }
+                            },
+                            "large-grid": {
+                                "geotile_grid": {
+                                    "field": "coordinates",
+                                    "precision": calcPrecision()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            /*
+                NHSL Retrofit Cost
+                nhsl_physical_exposure_all_indicators_b
+            */
+
+            var d = {
+                "size": 0,
+                "aggs": {
+                    "my_applicable_filters": {
+                        "filter": {
+                            "bool": {
+                                "must": [
+                                    {
+                                        "range": {
+                                            "properties.E_RetrofitCost": {
+                                                "gte": 0 //100000
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "geo_bounding_box": {
+                                            "geometry.coordinates": {
+                                                "top_left": b1.tllat + ',' + b1.tllon,
+                                                "bottom_right": b1.brlat + ',' + b1.brlon
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "aggs": {
+                            "avg_my_field": {
+                                "avg": {
+                                    "field": "properties.E_RetrofitCost"
+                                }
+                            },
+                            "large-grid": {
+                                "geotile_grid": {
+                                    "field": "geometry.coordinates",
+                                    "precision": calcPrecision()
+                                }
+                            }
                         }
                     }
                 }
@@ -255,15 +385,11 @@
             })
             .done( function ( resp ) {
 
-                console.log( resp );
-
                 let markers = [];
 
-                const buckets = resp.aggregations['large-grid'].buckets;
+                const buckets = resp.aggregations['my_applicable_filters']['large-grid'].buckets;
 
                 buckets.forEach( bucket => {
-                    
-                    // console.log( bucket );
 
                     splitbucket = bucket.key.split('/');
 
@@ -276,16 +402,29 @@
 
                     markers.push( [ lat, lon, bucket.doc_count ] );
 
+                    var bbox = merc.bbox( x, y, z ); //, tms_style, srs)
+
+                    // define rectangle geographical bounds
+                    var bounds = [ [ bbox[1], bbox[0] ], [ bbox[3], bbox[2] ] ];
+
+                    // create an orange rectangle
+                    var feature = L.rectangle( bounds, { color: getBucketColor( bucket.doc_count ), weight: 0, fillOpacity: 0.5 } );
+
+                    bboxLayer.addLayer( feature );
 
                     // https://github.com/adammertel/Leaflet.RegularGridCluster
+                    // https://observablehq.com/@larsvers/hexgrid-maps-with-d3-hexgrid
+                    // http://bl.ocks.org/tnightingale/4668062
 
                     
                 }); 
 
-                var heat = L.heatLayer( markers, { radius: 25 } ).addTo( map );
+                // display the heatmap
+                // heat.setLatLngs( markers );
+                // heat.setOptions( { blur: 15, radius: 25 } );
+
+                // var heat = L.heatLayer( markers, { radius: 25, minOpacity: 0.05, } ).addTo( map );
                 $( '#modal' ).remove();
-
-
 
                 // var len = geojsonLayer.getLayers().length;
 
@@ -359,6 +498,29 @@
                 d > 0.2   ? '#FEB24C' :
                 d > 0.1   ? '#FED976' :
                             '#FFEDA0';
+        }
+
+        // Generated by RampGenerator.com
+
+        // This function allows you to enter a value and have the color returned,
+        // useful when coloring geojson maps or anything else you can think of.
+
+        // sample usage:
+        // console.log(getColor(222222));
+        // result: #CB1230
+
+        function getBucketColor( v ) {
+            return v >= 10000 ? '#A41919' :
+                v >= 8889 ? '#AE3218' :
+                v >= 7778 ? '#B84C17' :
+                v >= 6667 ? '#C26516' :
+                v >= 5556 ? '#CC7F15' :
+                v >= 4444 ? '#D69814' :
+                v >= 3333 ? '#E0B213' :
+                v >= 2222 ? '#EACB12' :
+                v >= 1111 ? '#F4E511' :
+                v >= 0 ? '#FFFF10' :
+                        '#FFFF10'; 
         }
 
         function featureStyle( feature ) {
