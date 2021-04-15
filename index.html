@@ -129,7 +129,7 @@ opacity: .5;
         var scenario = "dsra_idm5p4_sidney_all_indicators_b",
             scenario = "nhsl_physical_exposure_all_indicators_b",
             scenario_prop = "MHn_Intensity",
-            base_url = "https://api.dev.riskprofiler.ca",
+            base_url = "https://api.staging.riskprofiler.ca/",
             featureLimit = 10000,
             markers = [],
             zoom = 5,
@@ -369,10 +369,10 @@ opacity: .5;
             // }
 
             // var url = scroll_id ? 
-            //     "https://api.dev.riskprofiler.ca/_search/scroll"
-            //         : "https://api.dev.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
+            //     "https://api.staging.riskprofiler.ca/_search/scroll"
+            //         : "https://api.staging.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
 
-            var url = "https://api.dev.riskprofiler.ca/" + scenario + "/_search";
+            var url = base_url + scenario + "/_search";
             
             $.ajax({
                 method: "POST",
@@ -545,7 +545,7 @@ opacity: .5;
                 tryCount : 0,
                 retryLimit : 3,
                 crossDomain: true,
-                url: base_url + "/" + scenario + "/_doc/" + e.layer.feature.properties['_id'],
+                url: base_url + scenario + "/_doc/" + e.layer.feature.properties['_id'],
                 headers: { "content-type": "application/json" }
             })
             .done( function ( resp ) {
