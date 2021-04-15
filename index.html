@@ -126,9 +126,9 @@ opacity: .5;
     
     <script>
 
-        var scenario = "dsra_idm5p4_sidney_all_indicators_b",
-            scenario = "nhsl_physical_exposure_all_indicators_b",
-            scenario_prop = "MHn_Intensity",
+        var feature_index = "nhsl_physical_exposure_all_indicators_s",
+            heat_index = "nhsl_physical_exposure_all_indicators_b",
+            feature_index_prop = "E_LandUse",
             base_url = "https://api.stage.riskprofiler.ca/",
             featureLimit = 10000,
             markers = [],
@@ -144,8 +144,7 @@ opacity: .5;
         });
 
         var geojsonLayer = L.geoJSON( null, { style: featureStyle } ),
-            // heat = L.heatLayer( markers, { blur: 15, radius: 25, gradient: { 0.4: 'yellow', 0.5: 'orange', 1: 'red' } } ),
-            heat = L.heatLayer( markers, { blur: 15, radius: 25 } ),
+            heat = L.heatLayer( markers, { blur: 15, radius: 25 } ), // , gradient: { 0.4: 'yellow', 0.5: 'orange', 1: 'red' } } ),
             legend = L.control( { position: 'bottomright' } ),
             map = L.map( 'map', { layers: [ tiles, geojsonLayer, heat ] }),
             bboxLayer = L.layerGroup().addTo( map );
@@ -174,18 +173,49 @@ opacity: .5;
             search();
         });
 
+        var overlayMaps = {
+            "Features": geojsonLayer,
+            "Heat": heat,
+            "Grid": bboxLayer
+        };
+
+        L.control.layers(overlayMaps).addTo( map );
+
         function search( scroll_id ) {
             
             $( '#alert' ).hide();
+
+            // remove the legend
+            map.removeControl( legend );
             
-            // clear the features in the layer
+            // clear the layers
             geojsonLayer.clearLayers();
             bboxLayer.clearLayers();
-
-            // heat.clear();
             
-            // get the data from Elasticsearch
-            getData();
+            // control layer visibility
+            if ( map.getZoom() <= 11 ) { 
+                map.removeLayer( geojsonLayer );
+            }
+            if ( map.getZoom() >= 4 ) { 
+                map.removeLayer( heat );
+                map.addLayer( bboxLayer );
+            }
+            if ( map.getZoom() > 6 ) {
+                map.addLayer( heat );
+                map.removeLayer( bboxLayer );
+            }
+            if ( map.getZoom() > 11 ) {
+                map.removeLayer( heat );
+                map.addLayer( geojsonLayer );
+
+                // get feature data
+                getFeatureData();
+
+                // add the legend
+                legend.addTo( map );
+            }
+            
+            getGridData();
         }
 
         /* calculate the grid precision
@@ -202,21 +232,21 @@ opacity: .5;
             The highest-precision geotile of length 29 produces cells that cover less than a 10cm by 10cm of land and so 
             high-precision requests can be very costly in terms of RAM and result sizes.
 
-            Leaflet Zoom Levels: 
+            Leaflet Zoom Levels: 15
 
             For the OSM service there are 18 zoom levels.
         */
         function calcPrecision() {
 
-            var p = (zoom*( 29/18 )).toFixed( 0 );
+            let p = ( zoom*( 29/18 ) ).toFixed( 0 );
 
-            // console.log( p );
-
-            return p;
+            p = ++p;
+            
+            return ++p;
 
         }
 
-        function getData( scroll_id ) {
+        function getFeatureData( scroll_id ) {
 
             var b = map.getBounds(),
                 b1 = {
@@ -227,26 +257,118 @@ opacity: .5;
                 }, scroll_id;
             
             // bounding box query
-            // var d = {  
-            //     "size": 1000,
-            //     "_source": [ "id","type", "geometry.*", "properties." + scenario_prop ],
+            var feature_query = {  
+                "size": 1000,
+                "_source": [ "id","type", "geometry.*", "properties." + feature_index_prop ],
+                "query": {
+                    "geo_shape": {
+                        "geometry": {
+                            "shape": {
+                                "type": "envelope",
+                                "coordinates": [ [ b1.tllon, b1.tllat ], [ b1.brlon, b1.brlat ] ]
+                            },
+                            "relation": "intersects"
+                        }
+                    }
+                }
+            }
+
+            // range query
+            // var d = {
             //     "query": {
-            //         "geo_shape": {
-            //             "geometry": {
-            //                 "shape": {
-            //                     "type": "envelope",
-            //                     "coordinates": [ [ b1.trlon, b1.trlat ], [ b1.bllon, b1.bllat ] ]
-            //                 },
-            //                 "relation": "intersects"
+            //         "range": {
+            //             "properties.sH_PGA": {
+            //                 "gte": 0.047580,
+            //                 "lte": 0.047584
             //             }
             //         }
             //     }
-            // }
+            // };
+
+            // return all query
+            // var feature_query = {
+            //     "size": "1000",
+            //     "query": {
+            //         "bool": {
+            //             "must": {
+            //                 "match_all": {}
+            //             }
+            //         }
+            //     }
+            // };
+
+            if ( scroll_id ) {
+                feature_query = {
+                    "scroll": "1m",
+                    "scroll_id" : scroll_id
+                }
+            }
+
+            var feature_url = scroll_id ? 
+                "https://api.stage.riskprofiler.ca/_search/scroll"
+                    : "https://api.stage.riskprofiler.ca/" + feature_index + "/_search?scroll=1m";
+
+            // Get Feature data
+            
+            $.ajax({
+                method: "POST",
+                tryCount : 0,
+                retryLimit : 3,
+                crossDomain: true,
+                url: feature_url,
+                data: JSON.stringify( feature_query ),
+                headers: { "content-type": "application/json" }
+            })
+            .done( function ( resp ) {
+
+                var len = geojsonLayer.getLayers().length;
+
+                if ( len === resp.hits.total.value || len === featureLimit ) {
+                    $( '#modal' ).remove();
+                }
+
+                if ( len < resp.hits.total.value && len < featureLimit ) {
+                    addGeoJSONFeatures( resp.hits.hits, function( e ) {
+                        if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
+                            getFeatureData( resp._scroll_id );
+                        }
+                        if ( geojsonLayer.getLayers().length >= featureLimit ) {
+                            $( '#alert' ).show();
+                        }
+                    } );
+                }
+
+                
+            })
+            .fail( function ( error ) {
+                this.tryCount++;
+                if ( this.tryCount <= this.retryLimit ) {
+                    //try again
+                    $.ajax( this );
+                    return;
+                }   
+                console.log( "Doh! " + error )         
+                return;
+                
+            });
+        }
+        
+
+        function getGridData() {
+
+            var b = map.getBounds(),
+                b1 = {
+                    "tllat": b.getNorthWest().lat > 90 ? 90 : b.getNorthWest().lat,
+                    "tllon": b.getNorthWest().lng < -180 ? -180 : b.getNorthWest().lng,
+                    "brlat": b.getSouthEast().lat < -90 ? -90 : b.getSouthEast().lat,
+                    "brlon": b.getSouthEast().lng > 180 ? 180 : b.getSouthEast().lng
+                }, scroll_id;
+            
             
             // Geotile Grid Aggregation
 
             /*
-                SCENARIO
+                heat_index
             */
             var d = {
                 "size": 0,
@@ -336,43 +458,10 @@ opacity: .5;
                     }
                 }
             }
+            
+            // Get Heat Map and Grid data
 
-            // range query
-            // var d = {
-            //     "query": {
-            //         "range": {
-            //             "properties.sH_PGA": {
-            //                 "gte": 0.047580,
-            //                 "lte": 0.047584
-            //             }
-            //         }
-            //     }
-            // };
-
-            // return all query
-            // var d = {
-            //     "size": "1000",
-            //     "query": {
-            //         "bool": {
-            //             "must": {
-            //                 "match_all": {}
-            //             }
-            //         }
-            //     }
-            // };
-
-            // if ( scroll_id ) {
-            //     d = {
-            //         "scroll": "1m",
-            //         "scroll_id" : scroll_id
-            //     }
-            // }
-
-            // var url = scroll_id ? 
-            //     "https://api.stage.riskprofiler.ca/_search/scroll"
-            //         : "https://api.stage.riskprofiler.ca/" + scenario + "/_search?scroll=1m";
-
-            var url = base_url + scenario + "/_search";
+            var url = base_url + heat_index + "/_search";
             
             $.ajax({
                 method: "POST",
@@ -420,28 +509,118 @@ opacity: .5;
                 }); 
 
                 // display the heatmap
-                // heat.setLatLngs( markers );
-                // heat.setOptions( { blur: 15, radius: 25 } );
+                heat.setLatLngs( markers );
+                heat.setOptions( { blur: 15, radius: 25 } );
 
-                // var heat = L.heatLayer( markers, { radius: 25, minOpacity: 0.05, } ).addTo( map );
                 $( '#modal' ).remove();
 
-                // var len = geojsonLayer.getLayers().length;
+            })
+            .fail( function ( error ) {
+                this.tryCount++;
+                if ( this.tryCount <= this.retryLimit ) {
+                    //try again
+                    $.ajax( this );
+                    return;
+                }   
+                console.log( "Doh! " + error )         
+                return;
+                
+            });
 
-                // if ( len === resp.hits.total.value || len === featureLimit ) {
-                //     $( '#modal' ).remove();
-                // }
+            $( '#modal' ).remove();
+        }
 
-                // if ( len < resp.hits.total.value && len < featureLimit ) {
-                //     addGeoJSONFeatures( resp.hits.hits, function( e ) {
-                //         if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
-                //             getData( resp._scroll_id );
-                //         }
-                //         if ( geojsonLayer.getLayers().length >= featureLimit ) {
-                //             $( '#alert' ).show();
-                //         }
-                //     } );
-                // }
+        function getFeatureData( scroll_id ) {
+
+            var b = map.getBounds(),
+                b1 = {
+                    "tllat": b.getNorthWest().lat > 90 ? 90 : b.getNorthWest().lat,
+                    "tllon": b.getNorthWest().lng < -180 ? -180 : b.getNorthWest().lng,
+                    "brlat": b.getSouthEast().lat < -90 ? -90 : b.getSouthEast().lat,
+                    "brlon": b.getSouthEast().lng > 180 ? 180 : b.getSouthEast().lng
+                }, scroll_id;
+            
+            // bounding box query
+            var feature_query = {  
+                "size": 1000,
+                "_source": [ "id","type", "geometry.*", "properties." + feature_index_prop ],
+                "query": {
+                    "geo_shape": {
+                        "geometry": {
+                            "shape": {
+                                "type": "envelope",
+                                "coordinates": [ [ b1.tllon, b1.tllat ], [ b1.brlon, b1.brlat ] ]
+                            },
+                            "relation": "intersects"
+                        }
+                    }
+                }
+            }
+
+            // range query
+            // var d = {
+            //     "query": {
+            //         "range": {
+            //             "properties.sH_PGA": {
+            //                 "gte": 0.047580,
+            //                 "lte": 0.047584
+            //             }
+            //         }
+            //     }
+            // };
+
+            // return all query
+            // var feature_query = {
+            //     "size": "1000",
+            //     "query": {
+            //         "bool": {
+            //             "must": {
+            //                 "match_all": {}
+            //             }
+            //         }
+            //     }
+            // };
+
+            if ( scroll_id ) {
+                feature_query = {
+                    "scroll": "1m",
+                    "scroll_id" : scroll_id
+                }
+            }
+
+            var feature_url = scroll_id ? 
+                "https://api.stage.riskprofiler.ca/_search/scroll"
+                    : "https://api.stage.riskprofiler.ca/" + feature_index + "/_search?scroll=1m";
+
+            // Get Feature data
+            
+            $.ajax({
+                method: "POST",
+                tryCount : 0,
+                retryLimit : 3,
+                crossDomain: true,
+                url: feature_url,
+                data: JSON.stringify( feature_query ),
+                headers: { "content-type": "application/json" }
+            })
+            .done( function ( resp ) {
+
+                var len = geojsonLayer.getLayers().length;
+
+                if ( len === resp.hits.total.value || len === featureLimit ) {
+                    $( '#modal' ).remove();
+                }
+
+                if ( len < resp.hits.total.value && len < featureLimit ) {
+                    addGeoJSONFeatures( resp.hits.hits, function( e ) {
+                        if ( resp.hits.hits.length > 0 && len <= featureLimit ) {
+                            getFeatureData( resp._scroll_id );
+                        }
+                        if ( geojsonLayer.getLayers().length >= featureLimit ) {
+                            $( '#alert' ).show();
+                        }
+                    } );
+                }
 
                 
             })
@@ -489,15 +668,24 @@ opacity: .5;
             }
         }
 
-        function getColor(d) {
-            return d > 0.7 ? '#800026' :
-                d > 0.6  ? '#BD0026' :
-                d > 0.5  ? '#E31A1C' :
-                d > 0.4  ? '#FC4E2A' :
-                d > 0.3   ? '#FD8D3C' :
-                d > 0.2   ? '#FEB24C' :
-                d > 0.1   ? '#FED976' :
-                            '#FFEDA0';
+        // Generated by RampGenerator.com
+
+        // This function allows you to enter a value and have the color returned,
+        // useful when coloring geojson maps or anything else you can think of.
+
+        // sample usage:
+        // console.log(getFeatureColor(40));
+        // result: #64ABD7
+
+        function getFeatureColor(d) {
+
+            return d == "RURAL" ? '#0050A8' :
+                d == "RES-LD" ? '#216EB7' :
+                d == "COMM-IND" ? '#428CC7' :
+                d == "RES-MD" ? '#64ABD7' :
+                d == "RES-HD" ? '#85C9E7' :
+                d == "MIXED" ? '#A7E8F7' :
+                        '#A7E8F7'; 
         }
 
         // Generated by RampGenerator.com
@@ -506,7 +694,7 @@ opacity: .5;
         // useful when coloring geojson maps or anything else you can think of.
 
         // sample usage:
-        // console.log(getColor(222222));
+        // console.log(getFeatureColor(222222));
         // result: #CB1230
 
         function getBucketColor( v ) {
@@ -525,7 +713,7 @@ opacity: .5;
 
         function featureStyle( feature ) {
             return {
-                fillColor: getColor( feature.properties[ scenario_prop ] ),
+                fillColor: getFeatureColor( feature.properties[ feature_index_prop ] ),
                 weight: 0.5,
                 opacity: 1,
                 color: 'white',
@@ -545,7 +733,7 @@ opacity: .5;
                 tryCount : 0,
                 retryLimit : 3,
                 crossDomain: true,
-                url: base_url + scenario + "/_doc/" + e.layer.feature.properties['_id'],
+                url: base_url + feature_index + "/_doc/" + e.layer.feature.properties['_id'],
                 headers: { "content-type": "application/json" }
             })
             .done( function ( resp ) {
@@ -581,22 +769,24 @@ opacity: .5;
         legend.onAdd = function ( map ) {
 
             var div = L.DomUtil.create('div', 'info legend'),
-                grades = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+                // grades = [ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 ],
+                grades = [ "RURAL", "RES-LD", "COMM-IND", "RES-MD", "RES-HD", "MIXED" ],
                 labels = [];
 
-            div.innerHTML = "<div style=\"padding: 3px;\"><b>" + scenario_prop + "</b></div>";
+            div.innerHTML = "<div style=\"padding: 3px;\"><b>" + feature_index_prop + "</b></div>";
 
             // loop through our density intervals and generate a label with a colored square for each interval
             for (var i = 0; i < grades.length; i++ ) {
+                // div.innerHTML +=
+                //     '<i style="background:' + getFeatureColor(grades[i]) + '"></i> ' +
+                //     grades[i] + ( grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+' );
                 div.innerHTML +=
-                    '<i style="background:' + getColor(grades[i]) + '"></i> ' +
-                    grades[i] + ( grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+' );
+                    '<i style="background:' + getFeatureColor(grades[i]) + '"></i> ' +
+                    grades[i] +  '<br>';
             }
 
             return div;
         };
-
-        // legend.addTo( map );
 
     </script>
 </body>
