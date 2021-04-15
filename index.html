@@ -139,8 +139,8 @@ opacity: .5;
             size: 256
         });
 
-        var tiles = L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors, Points &copy 2012 LINZ'
+        var tiles = L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://osm.org/copyright">OpenStreetMap</a> contributors, Points &copy 2012 LINZ'
         });
 
         var geojsonLayer = L.geoJSON( null, { style: featureStyle } ),
