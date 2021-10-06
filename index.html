@@ -101,9 +101,6 @@ opacity: .5;
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
         integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
         crossorigin=""></script>
-    <!-- <script src="node_modules/@elastic"></script> -->
-    <!-- <script src="node_modules/geohash/lib/geohash.js"></script>
-    <script src="lib/leaflet.markercluster.js"></script> -->
     <script src="https://code.jquery.com/jquery-1.12.2.min.js"
         integrity="sha256-lZFHibXzMHo3GGeehn1hudTAP3Sc0uKXBXAzHX1sjtk=" crossorigin="anonymous"></script>
 
@@ -126,9 +123,9 @@ opacity: .5;
     
     <script>
 
-        var feature_index = "nhsl_physical_exposure_all_indicators_s",
-            heat_index = "nhsl_physical_exposure_all_indicators_b",
-            feature_index_prop = "E_LandUse",
+        var feature_index = "opendrr_dsra_sim9p0_cascadiainterfacebestfault_all_indicators_s",
+            heat_index = "opendrr_dsra_sim9p0_cascadiainterfacebestfault_all_indicators_b",
+            feature_index_prop = "sH_PGA",
             base_url = "https://api.stage.riskprofiler.ca/",
             featureLimit = 10000,
             markers = [],
@@ -377,16 +374,16 @@ opacity: .5;
                         "filter": {
                             "bool": {
                                 "must": [
-                                    {
-                                        "range": {
-                                            "properties.sH_PGA": {
-                                                "gte": 0.002
-                                            }
-                                        }
-                                    },
+                                    // {
+                                    //     "range": {
+                                    //         "properties.sH_PGA": {
+                                    //             "gte": 0.002
+                                    //         }
+                                    //     }
+                                    // },
                                     {
                                         "geo_bounding_box": {
-                                            "geometry.coordinates": {
+                                            "coordinates": {
                                                 "top_left": b1.tllat + ',' + b1.tllon,
                                                 "bottom_right": b1.brlat + ',' + b1.brlon
                                             }
@@ -404,53 +401,6 @@ opacity: .5;
                             "large-grid": {
                                 "geotile_grid": {
                                     "field": "coordinates",
-                                    "precision": calcPrecision()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            /*
-                NHSL Retrofit Cost
-                nhsl_physical_exposure_all_indicators_b
-            */
-
-            var d = {
-                "size": 0,
-                "aggs": {
-                    "my_applicable_filters": {
-                        "filter": {
-                            "bool": {
-                                "must": [
-                                    {
-                                        "range": {
-                                            "properties.E_RetrofitCost": {
-                                                "gte": 0 //100000
-                                            }
-                                        }
-                                    },
-                                    {
-                                        "geo_bounding_box": {
-                                            "geometry.coordinates": {
-                                                "top_left": b1.tllat + ',' + b1.tllon,
-                                                "bottom_right": b1.brlat + ',' + b1.brlon
-                                            }
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        "aggs": {
-                            "avg_my_field": {
-                                "avg": {
-                                    "field": "properties.E_RetrofitCost"
-                                }
-                            },
-                            "large-grid": {
-                                "geotile_grid": {
-                                    "field": "geometry.coordinates",
                                     "precision": calcPrecision()
                                 }
                             }
@@ -677,15 +627,14 @@ opacity: .5;
         // console.log(getFeatureColor(40));
         // result: #64ABD7
 
-        function getFeatureColor(d) {
-
-            return d == "RURAL" ? '#0050A8' :
-                d == "RES-LD" ? '#216EB7' :
-                d == "COMM-IND" ? '#428CC7' :
-                d == "RES-MD" ? '#64ABD7' :
-                d == "RES-HD" ? '#85C9E7' :
-                d == "MIXED" ? '#A7E8F7' :
-                        '#A7E8F7'; 
+        function getFeatureColor(v) {
+            return v >= 0.31 ? '#bd0026' :
+                v >= 0.20 ? '#eb3420' :
+                v >= 0.13 ? '#fb7b35' :
+                v >= 0.08 ? '#feb751' :
+                v >= 0.03 ? '#ffe98c' :
+                v >= 0.01 ? '#ffff1d' :
+                        '#ffff1d'; 
         }
 
         // Generated by RampGenerator.com
@@ -698,17 +647,13 @@ opacity: .5;
         // result: #CB1230
 
         function getBucketColor( v ) {
-            return v >= 10000 ? '#A41919' :
-                v >= 8889 ? '#AE3218' :
-                v >= 7778 ? '#B84C17' :
-                v >= 6667 ? '#C26516' :
-                v >= 5556 ? '#CC7F15' :
-                v >= 4444 ? '#D69814' :
-                v >= 3333 ? '#E0B213' :
-                v >= 2222 ? '#EACB12' :
-                v >= 1111 ? '#F4E511' :
-                v >= 0 ? '#FFFF10' :
-                        '#FFFF10'; 
+            return v >= 10000 ? '#bd0026' :
+                v >= 7778 ? '#eb3420' :
+                v >= 5556 ? '#fb7b35' :
+                v >= 3333 ? '#feb751' :
+                v >= 1111 ? '#ffe98c' :
+                v >= 0 ? '#ffff1d' :
+                        '#ffff1d'; 
         }
 
         function featureStyle( feature ) {
@@ -723,10 +668,6 @@ opacity: .5;
         }
 
         geojsonLayer.on( 'click', function ( e ) {
-
-            // zoom to selected feature
-            // var bounds = e.layer.getBounds();
-            // map.fitBounds( bounds );
 
             $.ajax({
                 method: "GET",
@@ -769,20 +710,16 @@ opacity: .5;
         legend.onAdd = function ( map ) {
 
             var div = L.DomUtil.create('div', 'info legend'),
-                // grades = [ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 ],
-                grades = [ "RURAL", "RES-LD", "COMM-IND", "RES-MD", "RES-HD", "MIXED" ],
+                grades = [0.01 , 0.03, 0.08, 0.13, 0.20, 0.31],
                 labels = [];
 
             div.innerHTML = "<div style=\"padding: 3px;\"><b>" + feature_index_prop + "</b></div>";
 
             // loop through our density intervals and generate a label with a colored square for each interval
             for (var i = 0; i < grades.length; i++ ) {
-                // div.innerHTML +=
-                //     '<i style="background:' + getFeatureColor(grades[i]) + '"></i> ' +
-                //     grades[i] + ( grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+' );
                 div.innerHTML +=
                     '<i style="background:' + getFeatureColor(grades[i]) + '"></i> ' +
-                    grades[i] +  '<br>';
+                    grades[i] + ( grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+' );
             }
 
             return div;
